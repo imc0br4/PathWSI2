@@ -1,0 +1,12 @@
+*** Begin Patch
+*** Update File: ui/viewer/wsi_view.py
+@@
+     def _draw_multilevel_cover(self, painter: QPainter, visible_scene: QRectF, level_hint: int, seam_eps: float):
+         """先画更粗层级覆盖屏幕，再交给主循环画当前层/更细层。"""
+         ds_list = [float(d) for d in self.reader.level_downsamples]
+         if not ds_list:
+             return
++        if getattr(self.view, "_freeze_pix", None) is not None:
++            return
+         last = len(ds_list) - 1
+*** End Patch

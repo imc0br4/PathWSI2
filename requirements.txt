@@ -1,0 +1,21 @@
+# GUI & utils
+PySide6>=6.7,<6.8
+PyYAML>=6.0
+numpy>=1.26
+opencv-python-headless>=4.9
+Pillow>=10.3
+psutil>=5.9
+
+
+# Imaging
+openslide-python>=1.3 # 需要 openslide 二进制 DLL（下方说明）；若没有，程序会自动回退到 tifffile
+tifffile>=2024.2.12
+
+
+# ML
+torch>=2.3,<2.5
+torchvision>=0.18,<0.20
+
+
+# Packaging
+pyinstaller>=6.6
