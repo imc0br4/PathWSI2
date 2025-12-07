@@ -82,8 +82,6 @@ cache/
 # ===============
 # 深度学习模型权重
 # ===============
-*.pt
-*.pth
 *.ckpt
 *.h5
 *.hdf5
@@ -119,9 +117,6 @@ tensorboard/
 Thumbs.db
 desktop.ini
 # qiuyk
-
-*.pth
-*.pt
 
 # 数据集
 data/
