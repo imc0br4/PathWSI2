@@ -1,0 +1,148 @@
+# ======================
+# Python 编译 & 缓存文件
+# ======================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ===============
+# 虚拟环境相关
+# ===============
+.venv/
+venv/
+env/
+ENV/
+.conda/
+.venv*/
+pip-wheel-metadata/
+
+# ===============
+# 包 / 构建输出
+# ===============
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# ===============
+# IDE / 编辑器
+# ===============
+.vscode/
+.idea/
+*.iml
+
+# ===============
+# Jupyter
+# ===============
+.ipynb_checkpoints/
+
+# ===============
+# 测试 & 类型检查
+# ===============
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.coverage
+htmlcov/
+
+# ===============
+# 日志 & 运行输出
+# ===============
+logs/
+*.log
+*.out
+*.err
+
+# ===============
+# 临时文件
+# ===============
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# ===============
+# 数据 / 中间结果
+# （如果你有重要的小数据要进仓库，可以删掉或细化）
+# ===============
+data/
+datasets/
+outputs/
+results/
+checkpoints/
+tmp/
+cache/
+*.npz
+*.npy
+*.pkl
+*.pickle
+*.joblib
+
+# ===============
+# 深度学习模型权重
+# ===============
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.hdf5
+*.onnx
+*.pb
+*.weights
+*.bin
+*.safetensors
+
+# 常见训练输出目录（PyTorch Lightning / TensorBoard / wandb 等）
+lightning_logs/
+runs/
+wandb/
+tensorboard/
+
+# ===============
+# 配置文件（按需保留）
+# 如果你不想追踪任何 yaml/json 配置，就保留下面这几行；
+# 如果想把配置文件纳入版本控制，就删掉或只忽略某些目录下的
+# ===============
+*.yaml
+*.yml
+*.json
+
+# 例如：只忽略某些路径下的配置，可以改成：
+# configs/local_*.yaml
+# configs/debug/*.yaml
+
+# ===============
+# 操作系统杂项
+# ===============
+.DS_Store
+Thumbs.db
+desktop.ini
+# qiuyk
+
+*.pth
+*.pt
+
+# 数据集
+data/
+datasets/
+
+# 日志
+logs/
+*.log
+
+# 训练输出
+runs/
+outputs/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 大模型文件
+*.pt
+*.pth
+*.h5
+*.ckpt
+
