@@ -11,6 +11,9 @@ import numpy as np
 
 class RoiOpsMixin:
     def _enter_roi(self, draw: bool = True):
+        if hasattr(self, "view") and hasattr(self.view, "set_pan_deadzone"):
+        # 编辑时更不灵敏，避免点选抖动导致平移
+            self.view.set_pan_deadzone(12 if not draw else 8)
         if not self.reader:
             QMessageBox.information(self, "提示", "请先打开一张 WSI。")
             return
@@ -24,6 +27,8 @@ class RoiOpsMixin:
         self._update_buttons(active=True)
 
     def _exit_roi(self):
+        if hasattr(self, "view") and hasattr(self.view, "set_pan_deadzone"):
+            self.view.set_pan_deadzone(6)
         try:
             self.roi_tool.clear()
         except Exception:

@@ -182,22 +182,22 @@ class WsiPage(
         self.btn_edit.setPopupMode(QToolButton.MenuButtonPopup)
 
         # 主按钮：off <-> 当前主模式
-        self.btn_edit.clicked.connect(
-            lambda: self._set_edit_mode(self._main_button_mode if self._edit_mode == 'off' else 'off')
-        )
+        # self.btn_edit.clicked.connect(
+        #     lambda: self._set_edit_mode(self._main_button_mode if self._edit_mode == 'off' else 'off')
+        # )
 
-        def _switch_edit_mode(mode: str):
-            self._main_button_mode = mode
-            self._set_edit_mode(mode)
+        # def _switch_edit_mode(mode: str):
+        #     self._main_button_mode = mode
+        #     self._set_edit_mode(mode)
 
-        # 菜单：立刻切换到指定模式，并更新主按钮当前模式
-        self.act_edit_add.triggered.connect(lambda: _switch_edit_mode('add'))
-        self.act_edit_erase.triggered.connect(lambda: _switch_edit_mode('erase'))
+        # # 菜单：立刻切换到指定模式，并更新主按钮当前模式
+        # self.act_edit_add.triggered.connect(lambda: _switch_edit_mode('add'))
+        # self.act_edit_erase.triggered.connect(lambda: _switch_edit_mode('erase'))
 
-        # 菜单：撤销 / 保存 / 退出
-        self.act_edit_undo.triggered.connect(self._cancel_overlay_edits)
-        self.act_edit_save.triggered.connect(self._save_overlay_edits)
-        self.act_edit_exit.triggered.connect(lambda: self._set_edit_mode('off'))
+        # # 菜单：撤销 / 保存 / 退出
+        # self.act_edit_undo.triggered.connect(self._cancel_overlay_edits)
+        # self.act_edit_save.triggered.connect(self._save_overlay_edits)
+        # self.act_edit_exit.triggered.connect(lambda: self._set_edit_mode('off'))
 
         bar.addStretch(1)
         self.btn_help = QToolButton(self);

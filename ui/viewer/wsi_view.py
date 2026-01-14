@@ -9,7 +9,7 @@ import math
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal, QTimer, QPointF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QBrush, QPen
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView, QFrame, QWidget, QLabel
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView, QFrame, QWidget, QLabel,QApplication
 try:
     from PySide6.QtOpenGLWidgets import QOpenGLWidget
     HAVE_GL = True
@@ -1123,6 +1123,9 @@ class WsiView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
 
         self.app_cfg = app_cfg
+        self._pan_press_pos = None      # 鼠标左键按下位置（QPoint）
+        self._pan_started = False       # 是否已超过阈值进入真正拖动
+        self._pan_deadzone_px = max(6, QApplication.startDragDistance())
         viewer_cfg = self.app_cfg.get("viewer", {})
 
         self._snap_log2_eps = float(viewer_cfg.get("snap_log2_eps", 0.22))
@@ -2504,15 +2507,31 @@ class WsiView(QGraphicsView):
     #         return
     #     super().mouseDoubleClickEvent(e)
 
+
+
     def mousePressEvent(self, e):
         if getattr(self, "_interaction_locked", False):
             e.ignore()
             return
+
         if e.button() == Qt.LeftButton:
             self._kinetic_stop()
             self._drag_samples.clear()
             self._add_drag_sample(e)
-            self._panning = True
+
+ 
+            try:
+                self._pan_press_pos = e.position().toPoint()
+            except Exception:
+                self._pan_press_pos = e.pos()
+
+            self._pan_started = False  # 是否已经超过阈值进入“真正拖动”
+            self._panning = False      # 关键：点击时不要立刻置 True
+
+            # 阈值：Qt 默认拖拽距离 + 兜底
+            if not hasattr(self, "_pan_deadzone_px"):
+                self._pan_deadzone_px = max(6, QApplication.startDragDistance())
+
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
@@ -2520,11 +2539,27 @@ class WsiView(QGraphicsView):
             e.ignore()
             return
 
-        # 只有在按下左键拖动时，才记录拖动轨迹并标记为“正在平移”
         buttons = getattr(e, "buttons", lambda: 0)()
         if buttons & Qt.LeftButton:
+            # 还未进入真正拖动：先判断是否超过阈值
+            if not getattr(self, "_pan_started", False):
+                try:
+                    pos = e.position().toPoint()
+                except Exception:
+                    pos = e.pos()
+
+                press = getattr(self, "_pan_press_pos", None)
+                dead = int(getattr(self, "_pan_deadzone_px", max(6, QApplication.startDragDistance())))
+                if press is not None and (pos - press).manhattanLength() < dead:
+
+                    return super().mouseMoveEvent(e)
+
+
+                self._pan_started = True
+                self._panning = True
+
+            # 已进入真正拖动：记录轨迹，用于惯性
             self._add_drag_sample(e)
-            self._panning = True
 
         super().mouseMoveEvent(e)
 
@@ -2532,17 +2567,32 @@ class WsiView(QGraphicsView):
         if getattr(self, "_interaction_locked", False):
             e.ignore()
             return
+
         super().mouseReleaseEvent(e)
+
         if e.button() == Qt.LeftButton:
-            vx, vy = self._calc_release_velocity()
-            self._kinetic_start(vx, vy)
-            if not getattr(self, "_kinetic_active", False):
+
+            if getattr(self, "_pan_started", False):
+                vx, vy = self._calc_release_velocity()
+                self._kinetic_start(vx, vy)
+
+                if not getattr(self, "_kinetic_active", False):
+                    try:
+                        self._post_zoom_sweep_deadline = _time.perf_counter() + 0.8
+                        self._post_zoom_sweep_timer.start()
+                    except Exception:
+                        pass
+            else:
+                # 纯点击：清掉轨迹，避免误触发惯性/微动
                 try:
-                    self._post_zoom_sweep_deadline = _time.perf_counter() + 0.8
-                    self._post_zoom_sweep_timer.start()
+                    self._drag_samples.clear()
                 except Exception:
                     pass
+
             self._panning = False
+            self._pan_started = False
+            self._pan_press_pos = None
+
 
     def rotate_left(self):
         if getattr(self, "_loading_active", False):
@@ -3013,3 +3063,10 @@ class WsiView(QGraphicsView):
             self.viewport().update()
         except Exception:
             pass
+
+    def set_pan_deadzone(self, px: int):
+        # px<=0 视为恢复 Qt 默认
+        if px and int(px) > 0:
+            self._pan_deadzone_px = int(px)
+        else:
+            self._pan_deadzone_px = max(6, QApplication.startDragDistance())

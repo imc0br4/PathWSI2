@@ -71,10 +71,19 @@ class EditOpsMixin:
                 pass
 
     def _set_edit_mode(self, mode: Optional[str]):
+        # 先关掉编辑菜单（避免菜单残留）
+        try:
+            if hasattr(self, "btn_edit") and self.btn_edit and self.btn_edit.menu():
+                self.btn_edit.menu().hide()
+        except Exception:
+            pass
+
         mode = (mode or 'off').lower()
         if mode not in ('off', 'add', 'erase'):
             mode = 'off'
-        if getattr(self, "_edit_mode", 'off') == mode:
+
+        prev_mode = getattr(self, "_edit_mode", 'off')
+        if prev_mode == mode:
             return
 
         # 必须有 overlay 才能进编辑态
@@ -85,6 +94,24 @@ class EditOpsMixin:
         # 首次进入编辑态时做备份，便于撤销
         if mode != 'off' and getattr(self, "_grid_backup", None) is None and getattr(self, "_overlay_rgba", None) is not None:
             self._grid_backup = self._overlay_rgba.copy()
+
+        # ====== 新增：模式切换时清理所有预览（包含橡皮阴影）======
+        # 从 erase 离开：停掉 hover timer，清掉 pending 点，避免阴影“延迟回潮”
+        if prev_mode == 'erase' and mode != 'erase':
+            try:
+                if getattr(self, "_hover_timer", None):
+                    self._hover_timer.stop()
+            except Exception:
+                pass
+            self._hover_pending_pt = None
+
+        # 任何切换都清理一次预览：矩形预览 + 橡皮阴影
+        if hasattr(self, "_remove_edit_preview"):
+            try:
+                self._remove_edit_preview()
+            except Exception:
+                pass
+        # ====== 新增结束 ======
 
         self._edit_mode = mode
 
@@ -112,7 +139,8 @@ class EditOpsMixin:
             (getattr(self, "act_edit_save", None),  mode != 'off'),
             (getattr(self, "act_edit_exit", None),  mode != 'off'),
         ]:
-            if act: act.setEnabled(ok)
+            if act:
+                act.setEnabled(ok)
 
         self._hover_preview_enabled = (mode == 'erase')
 
@@ -124,6 +152,7 @@ class EditOpsMixin:
                 except Exception:
                     pass
             self._edit_origin_scene = None
+
 
     def _cancel_overlay_edits(self):
         if getattr(self, "_grid_backup", None) is not None and getattr(self, "_overlay_rgba", None) is not None:
@@ -147,6 +176,13 @@ class EditOpsMixin:
                 pass
 
     def _save_overlay_edits(self):
+        # 先关掉编辑菜单（避免菜单残留）
+        try:
+            if hasattr(self, "btn_edit") and self.btn_edit and self.btn_edit.menu():
+                self.btn_edit.menu().hide()
+        except Exception:
+            pass
+
         if getattr(self, "_overlay_rgba", None) is None:
             QMessageBox.information(self, "提示", "没有可保存的 overlay。")
             return

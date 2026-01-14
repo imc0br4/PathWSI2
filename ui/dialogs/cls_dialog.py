@@ -4,10 +4,12 @@ import os, json
 import numpy as np
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
-    QPushButton, QProgressBar, QMessageBox, QFileDialog
+    QPushButton, QProgressBar, QMessageBox, QFileDialog,
+    QAbstractSpinBox, QToolButton
 )
 
 # 复用你已有的 worker
@@ -44,6 +46,120 @@ def _parse_triplet(v, default):
     return list(default)
 
 
+# ---- 自带「-  +」按钮的 SpinBox（水平排列，更稳不容易错位） ----
+class _PlusMinusSpinBox(QSpinBox):
+    """右侧用两个小按钮显示 - / +，与系统主题解耦。"""
+
+    def __init__(self, symbol_color: str = "#4B5E6B", parent=None):
+        super().__init__(parent)
+        self._symbol_color = QColor(symbol_color or "#4B5E6B")
+        self._btn_minus = QToolButton(self)
+        self._btn_plus = QToolButton(self)
+        self._setup_buttons()
+
+        # 关闭原生上下箭头，只保留我们自己的 - / +
+        self.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        # 给右侧两个按钮腾出空间
+        self.setStyleSheet("""
+            QSpinBox {
+                padding-right: 34px;
+            }
+        """)
+
+    def _setup_buttons(self):
+        color = self._symbol_color.name()
+        for btn, txt, slot in (
+            (self._btn_minus, "-", self.stepDown),
+            (self._btn_plus,  "+", self.stepUp),
+        ):
+            btn.setText(txt)
+            btn.setAutoRepeat(True)
+            btn.clicked.connect(slot)
+            btn.setCursor(Qt.ArrowCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setStyleSheet(f"""
+                QToolButton {{
+                    border: none;
+                    padding: 0px;
+                    margin: 0px;
+                    background-color: transparent;
+                    font-weight: bold;
+                    color: {color};
+                }}
+                QToolButton:hover {{
+                    background-color: #E6F1FC;
+                }}
+            """)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 两个按钮水平排布，垂直居中
+        w = 16
+        h = self.height() - 4
+        y = 2
+        x_plus = self.width() - w - 2
+        x_minus = x_plus - w
+        self._btn_plus.setGeometry(x_plus, y, w, h)
+        self._btn_minus.setGeometry(x_minus, y, w, h)
+        self._btn_plus.raise_()
+        self._btn_minus.raise_()
+
+
+class _PlusMinusDoubleSpinBox(QDoubleSpinBox):
+    """DoubleSpinBox 版本的 - / + 按钮。"""
+
+    def __init__(self, symbol_color: str = "#4B5E6B", parent=None):
+        super().__init__(parent)
+        self._symbol_color = QColor(symbol_color or "#4B5E6B")
+        self._btn_minus = QToolButton(self)
+        self._btn_plus = QToolButton(self)
+        self._setup_buttons()
+
+        self.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.setStyleSheet("""
+            QDoubleSpinBox {
+                padding-right: 34px;
+            }
+        """)
+
+    def _setup_buttons(self):
+        color = self._symbol_color.name()
+        for btn, txt, slot in (
+            (self._btn_minus, "-", self.stepDown),
+            (self._btn_plus,  "+", self.stepUp),
+        ):
+            btn.setText(txt)
+            btn.setAutoRepeat(True)
+            btn.clicked.connect(slot)
+            btn.setCursor(Qt.ArrowCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setStyleSheet(f"""
+                QToolButton {{
+                    border: none;
+                    padding: 0px;
+                    margin: 0px;
+                    background-color: transparent;
+                    font-weight: bold;
+                    color: {color};
+                }}
+                QToolButton:hover {{
+                    background-color: #E6F1FC;
+                }}
+            """)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w = 16
+        h = self.height() - 4
+        y = 2
+        x_plus = self.width() - w - 2
+        x_minus = x_plus - w
+        self._btn_plus.setGeometry(x_plus, y, w, h)
+        self._btn_minus.setGeometry(x_minus, y, w, h)
+        self._btn_plus.raise_()
+        self._btn_minus.raise_()
+
+
 class ClsRunDialog(QDialog):
     # 把结果抛回 WSI 页面立即显示
     sigOverlayReady = Signal(np.ndarray, dict)  # rgba, meta
@@ -66,6 +182,8 @@ class ClsRunDialog(QDialog):
         self.models_cfg = models_cfg or {}
         self.log = logger
         self.slide_path = slide_path
+        pal = self.palette if isinstance(self.palette, dict) else {}
+        self._spin_symbol_color = pal.get("spinbox_symbol_color") or "#4B5E6B"
 
         self.worker: Optional[ClsWorker] = None
         self._export_worker: Optional[SaveOverlayWorker] = None
@@ -73,20 +191,18 @@ class ClsRunDialog(QDialog):
         self._last_meta: Optional[dict] = None
 
         self._build_ui()
-        self._apply_cls_theme()      # ★ 只做外观，不动逻辑
+        self._apply_cls_theme()      # 只做外观，不动逻辑
         self._populate_defaults()
 
     # ---------- 仅针对分类对话框的局部样式 ----------
     def _apply_cls_theme(self):
         """
         让 cls 对话框：
-          - 方角矩形（不再大圆角）
-          - SpinBox / DoubleSpinBox 箭头区域固定，并画出上下小三角
-        不改任何 worker 逻辑。
+          - 方角矩形
+          - 表单控件边框统一
         """
         primary = self.palette.get("primary", "#1A90FF")
         border_col = "#C7DDF2"
-        arrow_col = "#4B5E6B"
 
         self.setStyleSheet(f"""
         /* 只影响本对话框 */
@@ -94,7 +210,6 @@ class ClsRunDialog(QDialog):
             border-radius: 0px;
         }}
 
-        /* 文本、输入框边框稍微统一一下 */
         QDialog#ClsRunDialog QLabel {{
             color: #253A4F;
         }}
@@ -115,57 +230,9 @@ class ClsRunDialog(QDialog):
             border: 1px solid {primary};
         }}
 
-        /* SpinBox / DoubleSpinBox：预留按钮区域 */
         QDialog#ClsRunDialog QSpinBox,
         QDialog#ClsRunDialog QDoubleSpinBox {{
-            padding-right: 22px;    /* 右侧预留给上下按钮，避免覆盖上箭头 */
             min-height: 22px;
-        }}
-
-        /* 上下两个按钮的“区域” */
-        QDialog#ClsRunDialog QSpinBox::up-button,
-        QDialog#ClsRunDialog QDoubleSpinBox::up-button,
-        QDialog#ClsRunDialog QSpinBox::down-button,
-        QDialog#ClsRunDialog QDoubleSpinBox::down-button {{
-            subcontrol-origin: border;
-            width: 18px;
-            border-left: 1px solid {border_col};
-            background-color: #F5F7FA;
-        }}
-        QDialog#ClsRunDialog QSpinBox::up-button,
-        QDialog#ClsRunDialog QDoubleSpinBox::up-button {{
-            subcontrol-position: top right;
-            border-bottom: 1px solid {border_col};
-        }}
-        QDialog#ClsRunDialog QSpinBox::down-button,
-        QDialog#ClsRunDialog QDoubleSpinBox::down-button {{
-            subcontrol-position: bottom right;
-        }}
-        QDialog#ClsRunDialog QSpinBox::up-button:hover,
-        QDialog#ClsRunDialog QDoubleSpinBox::up-button:hover,
-        QDialog#ClsRunDialog QSpinBox::down-button:hover,
-        QDialog#ClsRunDialog QDoubleSpinBox::down-button:hover {{
-            background-color: #E6F1FC;
-        }}
-
-        /* 自己画出黑色小三角箭头，保证一定看得见 */
-        QDialog#ClsRunDialog QSpinBox::up-arrow,
-        QDialog#ClsRunDialog QDoubleSpinBox::up-arrow {{
-            width: 0;
-            height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-bottom: 6px solid {arrow_col};
-            margin-right: 4px;
-        }}
-        QDialog#ClsRunDialog QSpinBox::down-arrow,
-        QDialog#ClsRunDialog QDoubleSpinBox::down-arrow {{
-            width: 0;
-            height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 6px solid {arrow_col};
-            margin-right: 4px;
         }}
 
         /* 开始按钮高亮一点（可选） */
@@ -182,7 +249,7 @@ class ClsRunDialog(QDialog):
         }}
         """)
 
-    # ---------- UI ----------+
+    # ---------- UI ----------
     def _build_ui(self):
         lay = QVBoxLayout(self)
 
@@ -202,10 +269,23 @@ class ClsRunDialog(QDialog):
         row.addWidget(self.cmbModel, r, 1, 1, 3); r += 1
 
         # level / patch / overlap / batch
-        self.spLevel = QSpinBox();   self.spLevel.setRange(0, 8);     self.spLevel.setValue(0)
-        self.spPatch = QSpinBox();   self.spPatch.setRange(64, 4096); self.spPatch.setSingleStep(64); self.spPatch.setValue(512)
-        self.spOverlap = QSpinBox(); self.spOverlap.setRange(0, 1024); self.spOverlap.setSingleStep(16); self.spOverlap.setValue(32)
-        self.spBatch = QSpinBox();   self.spBatch.setRange(1, 128);    self.spBatch.setValue(8)
+        self.spLevel = _PlusMinusSpinBox(symbol_color=self._spin_symbol_color, parent=self)
+        self.spLevel.setRange(0, 8)
+        self.spLevel.setValue(0)
+
+        self.spPatch = _PlusMinusSpinBox(symbol_color=self._spin_symbol_color, parent=self)
+        self.spPatch.setRange(64, 4096)
+        self.spPatch.setSingleStep(64)
+        self.spPatch.setValue(1024)
+
+        self.spOverlap = _PlusMinusSpinBox(symbol_color=self._spin_symbol_color, parent=self)
+        self.spOverlap.setRange(0, 1024)
+        self.spOverlap.setSingleStep(16)
+        self.spOverlap.setValue(32)
+
+        self.spBatch = _PlusMinusSpinBox(symbol_color=self._spin_symbol_color, parent=self)
+        self.spBatch.setRange(1, 128)
+        self.spBatch.setValue(8)
 
         row.addWidget(QLabel("Level："), r, 0);  row.addWidget(self.spLevel, r, 1)
         row.addWidget(QLabel("Patch："), r, 2);  row.addWidget(self.spPatch, r, 3); r += 1
@@ -213,7 +293,11 @@ class ClsRunDialog(QDialog):
         row.addWidget(QLabel("Batch："), r, 2);  row.addWidget(self.spBatch, r, 3); r += 1
 
         # 阈值、GPU/FP16
-        self.spThresh = QDoubleSpinBox(); self.spThresh.setRange(0.0, 1.0); self.spThresh.setSingleStep(0.05); self.spThresh.setValue(0.5)
+        self.spThresh = _PlusMinusDoubleSpinBox(symbol_color=self._spin_symbol_color, parent=self)
+        self.spThresh.setRange(0.0, 1.0)
+        self.spThresh.setSingleStep(0.05)
+        self.spThresh.setValue(0.5)
+
         self.ckGPU = QCheckBox("优先用 GPU"); self.ckGPU.setChecked(True)
         self.ckFP16 = QCheckBox("FP16 (GPU)"); self.ckFP16.setChecked(True)
 
@@ -488,6 +572,56 @@ class ClsRunDialog(QDialog):
         self.lblStatus.setText(f"{done}/{total}（{pct}%）")
 
     def _on_done(self, result: dict):
+        self.btnStart.setEnabled(True)
+        self.lblStatus.setText("完成")
+        self.worker = None
+
+        rgba = None
+        meta = {}
+        if isinstance(result, dict):
+            rgba = result.get("overlay_rgba")
+            meta = result.get("meta") or {}
+        elif isinstance(result, (list, tuple)) and len(result) >= 2:
+            rgba, meta = result[0], (result[1] or {})
+        else:
+            meta = {}
+
+        if rgba is None:
+            QMessageBox.warning(self, "提示", "推理完成，但未返回 overlay。")
+            return
+
+        # --- 1) 规范化 meta，补齐关键字段（下游对齐/网格会用） ---
+        meta = dict(meta or {})
+        meta.setdefault("target", "classification_overlay")
+
+        # 有些 classify_slide 可能没补 bbox_level0/downsample，这里兜底一下
+        try:
+            h, w = int(rgba.shape[0]), int(rgba.shape[1])
+        except Exception:
+            h, w = 0, 0
+
+        if "downsample" not in meta:
+            # 对话框没有 reader，因此这里无法从 reader.level_downsamples 推 ds
+            # 但你的 ClsWorker.run() 已经会 setdefault("downsample", ds0)，正常不走到这里
+            meta["downsample"] = 1.0
+
+        if not meta.get("bbox_level0"):
+            ds = float(meta.get("downsample", 1.0) or 1.0)
+            meta["bbox_level0"] = [0, 0, int(round(w * ds)), int(round(h * ds))]
+
+        # --- 2) 缓存到对话框（导出按钮依赖） ---
+        self._last_rgba = rgba
+        self._last_meta = meta
+        self.btnExport.setEnabled(True)
+        self.lblStatus.setText("完成（可点击“导出结果…”保存 PNG + _meta.json）")
+
+        # --- 3) 关键：抛回 WsiPage，让它自动叠加 overlay ---
+        try:
+            self.sigOverlayReady.emit(rgba, meta)
+        except Exception:
+            # 不要让 UI 因为 emit 异常卡死
+            pass
+
         self.btnStart.setEnabled(True)
         self.lblStatus.setText("完成")
         self.worker = None

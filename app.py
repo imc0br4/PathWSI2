@@ -20,7 +20,7 @@ def _load_json(path: str):
         return json.load(f)
 
 
-def load_cfg():
+def load_cfg(): 
     """
     读取配置文件。若缺失或解析失败，抛出可读异常，便于上层记录日志并退出。
     行为与原来一致（成功则返回三元组）。
@@ -39,10 +39,7 @@ def load_cfg():
 
 
 def main():
-    print("tettedatda")
-
-    print("tettedatda")
-    print("tettedatda")
+    
     # 日志目录
     os.makedirs(os.path.join(APP_DIR, 'logs'), exist_ok=True)
     logger = get_logger('app', os.path.join(APP_DIR, 'logs', 'app.log'))

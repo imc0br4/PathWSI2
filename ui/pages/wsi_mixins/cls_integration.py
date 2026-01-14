@@ -200,48 +200,96 @@ class ClsIntegrationMixin:
         dlg.exec()
 
     def _on_cls_overlay_ready(self, rgba, meta):
-        """把分类结果直接铺到当前视图。"""
+        """把分类结果直接铺到当前视图（稳定：先降采样，再 set_rgba）。"""
         try:
             if rgba is None:
                 return
+
+            # meta 兜底
+            if not isinstance(meta, dict):
+                meta = {}
+
+            # 确保 overlay_item 存在且在 scene 中
             if self.overlay_item is None or self.overlay_item.scene() is None:
                 self._create_overlay_item()
-            self.overlay_item.set_rgba(rgba)
-            # 对齐参数（如果 meta 里有）
-            ds = float(meta.get("downsample", getattr(self, "_overlay_ds", 1.0)))
-            x0, y0, w0, h0 = 0, 0, rgba.shape[1], rgba.shape[0]
-            if isinstance(meta.get("bbox_level0"), (list, tuple)) and len(meta["bbox_level0"]) >= 4:
-                x0, y0, w0, h0 = [int(v) for v in meta["bbox_level0"][:4]]
-            # 1) 取正确的 ds（若 meta 没带 downsample，用 reader 的 level ds）
-            lvl = int(meta.get("level", 0))
+
+            # ----------------------------
+            # 1) 解析对齐参数：x0,y0（优先 bbox_level0 / roi_level0）
+            # ----------------------------
+            x0 = y0 = 0
+            roi = meta.get("bbox_level0") or meta.get("roi_level0")
+            if isinstance(roi, (list, tuple)) and len(roi) >= 2:
+                try:
+                    x0, y0 = int(roi[0]), int(roi[1])
+                except Exception:
+                    x0 = y0 = 0
+
+            # ----------------------------
+            # 2) 解析 downsample：优先 meta，否则用 reader.level_downsamples[level]
+            # ----------------------------
+            ds = None
             if "downsample" in meta:
-                ds = float(meta["downsample"])
-            else:
-                ds_list = [float(d) for d in self.reader.level_downsamples]
-                ds = ds_list[lvl] if 0 <= lvl < len(ds_list) else 1.0
+                try:
+                    ds = float(meta["downsample"])
+                except Exception:
+                    ds = None
 
-            # 2) 显示安全降采样 + 同步 ds / grid
-            rgba, ds, _, meta = self._downsample_overlay_for_display(rgba, ds, meta)
+            if ds is None:
+                try:
+                    lvl = int(meta.get("level", 0))
+                except Exception:
+                    lvl = 0
+                try:
+                    if getattr(self, "reader", None) is not None:
+                        ds_list = [float(d) for d in self.reader.level_downsamples]
+                        ds = ds_list[lvl] if 0 <= lvl < len(ds_list) else 1.0
+                    else:
+                        ds = 1.0
+                except Exception:
+                    ds = 1.0
 
-            # 3) 再去 set_rgba / setScale / setPos ...
+            # ----------------------------
+            # 3) 显示安全降采样（重要：在 set_rgba 之前做）
+            #    这一步会把 ds 同步乘上 sf，并更新 meta 里的 grid_tile_px_on_overlay
+            # ----------------------------
+            rgba_disp, ds_disp, _, meta2 = self._downsample_overlay_for_display(rgba, ds, dict(meta))
+
+            # ----------------------------
+            # 4) 应用到场景（现在再 set_rgba）
+            # ----------------------------
+            self.overlay_item.set_rgba(rgba_disp)
             self.overlay_item.setPos(int(x0), int(y0))
-            self.overlay_item.setScale(ds)
+            # self.overlay_item.setScale(float(ds_disp))
+            scale = float(ds_disp)
+            if meta2.get("overlay_kind") == "grid":
+                stride_lv = int(meta2.get("stride_size_level", 1))
+                scale *= max(1, stride_lv)          # ✅ 每个 grid 像素放大 stride 个 level 像素
+
+            self.overlay_item.setScale(scale)
+
             self.overlay_item.setOpacity(self._overlay_opacity)
             self.overlay_item.setVisible(True)
 
-            # 记住状态，后续编辑 / 二阶段检测 用
-            self._overlay_rgba = rgba
-            self._overlay_ds = ds
+            # ----------------------------
+            # 5) 记录状态（后续编辑/二阶段检测使用）
+            # ----------------------------
+            self._overlay_rgba = rgba_disp
+            self._overlay_ds = float(ds_disp)
             self._overlay_pos = (int(x0), int(y0))
-            self._overlay_meta = meta if isinstance(meta, dict) else {}
+            self._overlay_meta = meta2 if isinstance(meta2, dict) else {}
+
             # 自动推断格子大小
             auto_tile = self._infer_tile_from_meta(self._overlay_meta, default=self._grid_tile_px)
             if auto_tile and auto_tile > 0:
                 self._grid_tile_px = int(auto_tile)
+
+            # 启用编辑按钮
             if hasattr(self, "btn_edit"):
                 self.btn_edit.setEnabled(True)
+
         except Exception:
             self.log.exception("Apply overlay failed")
+
 
     def _apply_overlay_from_worker(self, rgba: np.ndarray, meta: dict):
         """直接把分类得到的 overlay RGBA + meta 应用到场景，并记录对齐。"""

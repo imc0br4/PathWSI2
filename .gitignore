@@ -141,3 +141,7 @@ env/
 *.h5
 *.ckpt
 
+# outputs / caches
+exports/
+exports/**/*.png
+exports/patches/

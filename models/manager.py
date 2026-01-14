@@ -15,7 +15,7 @@ except Exception:
 
 
 def _fallback_classifier(num_classes: int = 6):
-    """兜底：极简分类器，防止你忘了放 cls_res 时代码也能跑（精度很低，仅排障用）。"""
+    """兜底：极简分类器（精度很低，仅排障用）。"""
     import torch.nn as nn
     return nn.Sequential(
         nn.Conv2d(3, 32, 3, 2, 1), nn.ReLU(True),
@@ -30,34 +30,48 @@ def _build_arch(arch: Optional[str], num_classes: int):
     name = (arch or "cls_res").lower()
     if name in ("cls_res", "resunet50_cls", "resunet50"):
         if _build_cls_res is not None:
-            # 离线环境：不在这里加载预训练；你的 state_dict 会覆盖
             return _build_cls_res(num_classes=num_classes, pretrained_backbone=False)
         return _fallback_classifier(num_classes=num_classes)
     raise ValueError(f"Unsupported arch: {arch}. Only 'cls_res' is registered.")
 
 
 class ModelRunner:
-    """
-    统一推理器：
-      输入: float32 [N,3,H,W] 0..1（已按 mean/std 规范化）
-      输出: float32 [N,C] 或 [N,C,h,w]
-    """
     def __init__(self, model: torch.nn.Module, device: torch.device, amp: bool):
-        self.model = model.eval().to(device)
         self.device = device
         self.amp = bool(amp)
 
+        self.model = model.eval().to(device)
+
+        # ✅ CUDA 专属：channels_last 往往能提升吞吐（不影响 CPU）
+        if getattr(self.device, "type", "") == "cuda":
+            try:
+                self.model = self.model.to(memory_format=torch.channels_last)
+            except Exception:
+                pass
+
     @torch.no_grad()
-    def __call__(self, batch: torch.Tensor) -> torch.Tensor:
+    def __call__(self, batch: torch.Tensor, return_cpu: bool = True) -> torch.Tensor:
+        # CUDA 专属：确保输入也尽量 channels_last
+        if getattr(self.device, "type", "") == "cuda":
+            try:
+                batch = batch.contiguous(memory_format=torch.channels_last)
+            except Exception:
+                pass
+
         batch = batch.to(self.device, non_blocking=True)
+
         ctx = (
-            torch.autocast(device_type='cuda', dtype=torch.float16, enabled=True)
-            if (self.amp and self.device.type == 'cuda')
+            torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True)
+            if (self.amp and getattr(self.device, "type", "") == "cuda")
             else nullcontext()
         )
         with ctx:
             out = self.model(batch)
-        return out.float().cpu()
+
+        # 默认分割/其它路径需要 CPU；分类路径可 return_cpu=False 留在 GPU
+        if return_cpu:
+            return out.float().cpu()
+        return out
 
 
 def load_model(
@@ -71,37 +85,47 @@ def load_model(
     返回 (runner, meta)
       - runner: 可调用，批量输出
       - meta:   {'arch','device','jit','num_classes','amp'}
-
-    支持：
-      1) TorchScript: torch.jit.load(model_path)
-      2) 普通 state_dict: 需提供 arch（默认 'cls_res'）
     """
     if not os.path.isfile(model_path):
         raise FileNotFoundError(model_path)
 
     device = pick_device(prefer_gpu=prefer_gpu)
     if amp is None:
-        amp = (hasattr(device, "type") and device.type == 'cuda')
+        amp = (hasattr(device, "type") and device.type == "cuda")
+
+    # ✅ CUDA 专属：全局加速开关（CPU 不受影响）
+    if hasattr(device, "type") and device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception:
+            pass
 
     # 先尝试 TorchScript
     jit_ok = False
     try:
         jit_model = torch.jit.load(model_path, map_location=device)
+        # 可选：推理优化（不一定所有版本都有）
+        try:
+            jit_model = torch.jit.optimize_for_inference(jit_model)
+        except Exception:
+            pass
+
         runner = ModelRunner(jit_model, device, amp=amp)
         jit_ok = True
         arch_used = "torchscript"
     except Exception:
-        # 再走 state_dict 路线
         net = _build_arch(arch, num_classes=num_classes)
-        # models/manager.py 里 load_model 的普通 state_dict 分支：
         try:
-            sd = torch.load(model_path, map_location='cpu', weights_only=True)  # torch>=2.4
+            sd = torch.load(model_path, map_location="cpu", weights_only=True)  # torch>=2.4
         except TypeError:
-            sd = torch.load(model_path, map_location='cpu')  # 老版本回退
+            sd = torch.load(model_path, map_location="cpu")  # 老版本回退
 
         if isinstance(sd, dict) and "state_dict" in sd:
             sd = sd["state_dict"]
-        _ = net.load_state_dict(sd, strict=False)  # 允许非严格，便于不同 BN/头部命名
+        _ = net.load_state_dict(sd, strict=False)
         runner = ModelRunner(net, device, amp=amp)
         arch_used = (arch or "cls_res")
 
@@ -110,6 +134,6 @@ def load_model(
         "device": getattr(device, "type", str(device)),
         "jit": jit_ok,
         "num_classes": int(num_classes),
-        "amp": bool(amp)
+        "amp": bool(amp),
     }
     return runner, meta
